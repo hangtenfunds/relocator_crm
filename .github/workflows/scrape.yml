@@ -1,0 +1,49 @@
+name: OEDIT Scraper
+
+# Runs on the third Friday of every month at 9 AM Mountain Time
+# (the day after the EDC typically meets), and also supports manual runs.
+on:
+  schedule:
+    # 15:00 UTC = 9 AM MDT / 8 AM MST. Cron uses UTC.
+    # "0 15 15-21 * 5" = 9am UTC weekday-aligned third-Friday approximation.
+    # GitHub Actions cron doesn't support "nth-of-month" directly, so we
+    # run every Friday in the second half and the script handles dedup.
+    - cron: '0 15 15-21 * 5'
+  workflow_dispatch:  # allow manual triggering from the Actions tab
+    inputs:
+      months:
+        description: 'How many recent months to scrape'
+        required: false
+        default: '3'
+      dry_run:
+        description: 'Dry run? (true/false)'
+        required: false
+        default: 'false'
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run OEDIT scraper
+        env:
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+          GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
+        run: |
+          MONTHS="${{ github.event.inputs.months || '3' }}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python main.py --months "$MONTHS" --dry-run -v
+          else
+            python main.py --months "$MONTHS" -v
+          fi
