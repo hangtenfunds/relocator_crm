@@ -1,0 +1,19 @@
+# Secrets — never commit these
+.env
+service-account.json
+credentials.json
+*-credentials.json
+*-service-account.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
