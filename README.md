@@ -1,12 +1,30 @@
 # Relocation CRM Scrapers
 
 Automated intel pipeline that feeds the CRM Inbox with new corporate
-relocation signals. Phase 2 ships with the **OEDIT scraper**, which
-pulls Colorado Economic Development Commission approved projects each
-month and posts them to the Inbox for review.
+relocation signals.
 
-Future scrapers (Bisnow Denver, BusinessDen, Mile High CRE, etc.) will
-plug into the same `sheets_client` and infrastructure.
+Two signal sources are live:
+
+- **OEDIT scraper** — pulls Colorado Economic Development Commission
+  approved projects each month (structured, high-signal: company/codename,
+  job count, county, incentive, industry).
+- **News scraper** — aggregates Denver-area relocation/expansion headlines
+  from Google News RSS across all publishers Google indexes (Bisnow, Denver
+  Business Journal, BusinessDen, Denver Gazette, Denver Post, etc.) in one
+  clean feed. Surfaces headlines + links into the Inbox; your Monday triage
+  confirms the company and decides Create/Link/Ignore.
+
+Both write into the same Inbox and share the same dedup, fuzzy-matching,
+and Apps Script flow.
+
+### A note on the news scraper
+
+It uses Google News RSS the way a personal RSS reader / alert system does:
+it stores only headlines, publisher names, links, and dates, and every row
+links back to the original publisher. It does not republish or display
+content publicly. It fetches politely (a couple seconds between queries).
+If you ever expand this into anything public-facing, review Google News and
+each publisher's terms first.
 
 ---
 
@@ -14,16 +32,18 @@ plug into the same `sheets_client` and infrastructure.
 
 ```
 relocation_scrapers/
-├── main.py                  CLI entry point
-├── oedit_scraper.py         OEDIT-specific fetch + parse logic
+├── main.py                  CLI entry point (runs one or all scrapers)
+├── oedit_scraper.py         OEDIT fetch + parse logic
+├── news_scraper.py          Google News RSS aggregation logic
 ├── sheets_client.py         Reusable Google Sheets read/write wrapper
 ├── config.py                Loads credentials + spreadsheet ID from env
-├── test_parser.py           Parser test (synthetic HTML, no network)
+├── test_parser.py           OEDIT parser test (synthetic HTML, no network)
+├── test_news.py             News scraper test (synthetic feed, no network)
 ├── requirements.txt         Python dependencies
 ├── .env.example             Template for local env vars
 ├── .gitignore               Keeps secrets out of git
 └── .github/workflows/
-    └── scrape.yml           GitHub Actions schedule (third Friday monthly)
+    └── scrape.yml           Schedules: OEDIT monthly, news weekly
 ```
 
 ---
@@ -121,13 +141,19 @@ This is the "set and forget" part — automated monthly runs.
    - **`GOOGLE_SHEETS_CREDENTIALS_JSON`** — paste the **full contents**
      of `service-account.json` as a single string (it's JSON; just
      copy-paste everything including the curly braces).
-4. The workflow is already in `.github/workflows/scrape.yml`. It will
-   run automatically every Friday between the 15th and 21st of the
-   month (covering the day after each EDC meeting). The dedup logic
-   means running multiple times is safe — duplicates are skipped.
-5. **Test the schedule manually:** go to the **Actions** tab on GitHub,
-   pick "OEDIT Scraper" from the left sidebar, click **Run workflow**,
-   and choose `--dry-run` or a real run.
+4. The workflow is already in `.github/workflows/scrape.yml`. It runs on
+   two schedules automatically:
+   - **OEDIT** — every Friday between the 15th and 21st (the one after each
+     monthly EDC meeting).
+   - **News** — every Monday morning (catches the prior week's coverage).
+   The dedup logic makes overlapping runs safe — duplicates are skipped.
+5. **Test it manually:** go to the **Actions** tab on GitHub, pick
+   "Relocation CRM Scrapers", click **Run workflow**, choose which scraper
+   (`all` / `oedit` / `news`) and whether it's a dry run.
+
+> **Note on the new news-scraper schedule:** because you already had the
+> workflow installed from Phase 2, pushing this update replaces it. The new
+> file adds the Monday news cron and a scraper-selector. No secrets change.
 
 You should see logs like:
 ```
@@ -159,24 +185,42 @@ Once Phase 2 is running:
 ## Running locally — common commands
 
 ```bash
-# Standard run (last 3 months, write to Sheet)
+# Run ALL scrapers (OEDIT + news), write to Sheet
 python main.py
 
-# Last 6 months (useful for the first run to backfill)
-python main.py --months 6
+# Run just one scraper
+python main.py --only oedit
+python main.py --only news
 
-# Specific month
-python main.py --target 2026-04
+# OEDIT lookback of 6 months (useful for a first backfill)
+python main.py --only oedit --months 6
 
-# Dry run (parse and print only, no writes)
-python main.py --dry-run -v
+# OEDIT for a specific month
+python main.py --only oedit --target 2026-04
 
-# Skip projects outside the Front Range
-python main.py --front-range-only
+# Dry run (parse and print only, no writes) — great for testing the news feed
+python main.py --only news --dry-run -v
+
+# Skip OEDIT projects outside the Front Range
+python main.py --only oedit --front-range-only
 
 # Run parser-only tests (no network, no credentials needed)
 python test_parser.py
+python test_news.py
 ```
+
+### Tuning the news queries
+
+The search queries live at the top of `news_scraper.py` in the `QUERIES`
+list. Each entry is one Google News RSS search. Edit, add, or remove them
+to tune what gets surfaced. The `when:30d` suffix limits each query to the
+last 30 days. After editing, test with:
+
+```bash
+python main.py --only news --dry-run -v
+```
+
+to see exactly which headlines match before writing anything.
 
 ---
 
@@ -233,4 +277,3 @@ The dedup, fuzzy matching, and Sheets writing are all reusable.
   updates.
 - **Annually:** rotate the service account key in Google Cloud Console
   and update the secret in GitHub.
-# relocator_crm

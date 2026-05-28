@@ -90,6 +90,27 @@ class SheetsClient:
             if len(row) >= 5 and row[3] and row[4]
         }
 
+    def get_all_known_urls(self) -> set[str]:
+        """
+        Returns every source_url currently present anywhere in the system
+        (Signals + Inbox + Inbox_Archive). Used by news-style scrapers where
+        each article has a unique URL, so URL-only dedup is reliable.
+        (OEDIT can't use this because many projects share one monthly URL.)
+        """
+        urls: set[str] = set()
+        urls |= self.get_signal_source_urls()
+        for tab_name in ("Inbox", "Inbox_Archive"):
+            try:
+                tab = self._tab(tab_name)
+            except gspread.WorksheetNotFound:
+                continue
+            all_values = tab.get_all_values()
+            if len(all_values) < 2:
+                continue
+            # Column D (idx 3) = source_url
+            urls |= {row[3] for row in all_values[1:] if len(row) >= 4 and row[3]}
+        return urls
+
     # ----- Writes --------------------------------------------------------
 
     def append_inbox_rows(self, rows: list[dict]) -> int:

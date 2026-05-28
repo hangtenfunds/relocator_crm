@@ -1,18 +1,24 @@
-name: OEDIT Scraper
+name: Relocation CRM Scrapers
 
-# Runs on the third Friday of every month at 9 AM Mountain Time
-# (the day after the EDC typically meets), and also supports manual runs.
+# Two schedules with different cadences:
+#   - OEDIT: monthly, the Friday after the third-Thursday EDC meeting
+#   - News:  weekly, every Monday morning (catches the prior week's coverage)
+# Both also support manual runs from the Actions tab.
 on:
   schedule:
-    # 15:00 UTC = 9 AM MDT / 8 AM MST. Cron uses UTC.
-    # "0 15 15-21 * 5" = 9am UTC weekday-aligned third-Friday approximation.
-    # GitHub Actions cron doesn't support "nth-of-month" directly, so we
-    # run every Friday in the second half and the script handles dedup.
+    # OEDIT: every Friday between the 15th and 21st at 15:00 UTC (9am MT).
+    # Exactly one such Friday falls each month - the one after the EDC meets.
     - cron: '0 15 15-21 * 5'
-  workflow_dispatch:  # allow manual triggering from the Actions tab
+    # News: every Monday at 14:00 UTC (8am MT).
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
     inputs:
+      scraper:
+        description: 'Which scraper to run (all / oedit / news)'
+        required: false
+        default: 'all'
       months:
-        description: 'How many recent months to scrape'
+        description: 'OEDIT lookback in months'
         required: false
         default: '3'
       dry_run:
@@ -36,14 +42,42 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run OEDIT scraper
+      - name: Decide which scraper to run
+        id: which
+        run: |
+          # Manual run: honor the dropdown. Scheduled run: pick by cron.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "scraper=${{ github.event.inputs.scraper || 'all' }}" >> "$GITHUB_OUTPUT"
+            echo "dry=${{ github.event.inputs.dry_run || 'false' }}" >> "$GITHUB_OUTPUT"
+            echo "months=${{ github.event.inputs.months || '3' }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "0 14 * * 1" ]; then
+            # Monday news run
+            echo "scraper=news" >> "$GITHUB_OUTPUT"
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "months=3" >> "$GITHUB_OUTPUT"
+          else
+            # Friday OEDIT run
+            echo "scraper=oedit" >> "$GITHUB_OUTPUT"
+            echo "dry=false" >> "$GITHUB_OUTPUT"
+            echo "months=3" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run scraper
         env:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           GOOGLE_SHEETS_CREDENTIALS_JSON: ${{ secrets.GOOGLE_SHEETS_CREDENTIALS_JSON }}
         run: |
-          MONTHS="${{ github.event.inputs.months || '3' }}"
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            python main.py --months "$MONTHS" --dry-run -v
-          else
-            python main.py --months "$MONTHS" -v
+          SCRAPER="${{ steps.which.outputs.scraper }}"
+          MONTHS="${{ steps.which.outputs.months }}"
+          DRY="${{ steps.which.outputs.dry }}"
+
+          ARGS="-v --months $MONTHS"
+          if [ "$SCRAPER" != "all" ]; then
+            ARGS="$ARGS --only $SCRAPER"
           fi
+          if [ "$DRY" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+
+          echo "Running: python main.py $ARGS"
+          python main.py $ARGS
