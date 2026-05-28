@@ -125,9 +125,72 @@ def test_publisher_fallback():
     print("✓ publisher fallback via ' - ' suffix")
 
 
+def test_negative_filtering():
+    # Sports headlines rejected even though they match geo + a signal term
+    sports = NewsItem(
+        title="Schedule for Colorado Avalanche's Western Conference final games released",
+        link="x", published=None, publisher="CBS", summary="",
+    )
+    assert not is_relevant(sports), "Avalanche/sports should be rejected"
+
+    nwsl = NewsItem(
+        title="Denver Summit and Boston Legacy show reward of NWSL expansion",
+        link="x", published=None, publisher="ESPN", summary="",
+    )
+    assert not is_relevant(nwsl), "NWSL expansion should be rejected"
+
+    # Restaurant / retail rejected
+    deli = NewsItem(
+        title="Call Your Mother Deli Plans Expansion in Denver",
+        link="x", published=None, publisher="WhatNow", summary="",
+    )
+    assert not is_relevant(deli), "Deli should be rejected"
+
+    # Aurora Innovation (trucking company) rejected despite 'Aurora' + 'expand'
+    aurora_co = NewsItem(
+        title="Aurora and Hirschbach Expand Driver As A Service Freight Ambitions",
+        link="x", published=None, publisher="Yahoo Finance", summary="",
+    )
+    assert not is_relevant(aurora_co), "Aurora Innovation/Hirschbach should be rejected"
+
+    # Residential rejected
+    resi = NewsItem(
+        title="Denver's Apiary Residences opens hotel-style rental community",
+        link="x", published=None, publisher="ColoradoBiz", summary="",
+    )
+    assert not is_relevant(resi), "Residential should be rejected"
+
+    # A genuine office relocation still passes
+    good = NewsItem(
+        title="Ramon.Space Expands U.S. Engineering Operations with New Denver-Area Office",
+        link="x", published=None, publisher="SpaceWatch", summary="",
+    )
+    assert is_relevant(good), "Genuine office expansion should pass"
+
+    # City-of-Aurora aerospace signal still passes (must not be harmed)
+    aurora_city = NewsItem(
+        title="Defense contractor leases new Aurora facility, adds 200 jobs",
+        link="x", published=None, publisher="DBJ", summary="",
+    )
+    assert is_relevant(aurora_city), "City-of-Aurora aerospace signal must survive"
+    print("✓ negative filtering (sports/food/residential/Aurora-collision)")
+
+
+def test_industry_not_overgreedy():
+    # 'office space' must NOT classify as Aerospace/Defense anymore
+    from oedit_scraper import classify_industry
+    assert classify_industry("leases Boulder space for new HQ") != "Aerospace/Defense"
+    # genuine aerospace still classifies
+    assert classify_industry("rocket engine company") == "Aerospace/Defense"
+    assert classify_industry("aerospace and defense sector") == "Aerospace/Defense"
+    print("✓ industry classifier no longer over-greedy on 'space'")
+
+
 if __name__ == "__main__":
     test_company_guess()
     test_relevance()
+    test_negative_filtering()
+    test_industry_not_overgreedy()
     test_parse_entry()
     test_publisher_fallback()
     print("\n✓ All news scraper tests passed.")

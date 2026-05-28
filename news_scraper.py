@@ -86,6 +86,36 @@ SIGNAL_TERMS = [
     "new facility", "campus", "sign lease", "signs lease", "leases",
 ]
 
+# Hard-reject terms. A headline containing ANY of these is dropped as noise
+# regardless of geo/signal matches. Grouped by category so it's easy to
+# extend as you spot new noise patterns during triage. NOTE: we deliberately
+# do NOT blanket-reject "industrial"/"warehouse" (some are real manufacturing
+# expansions) or outdoor-industry terms (outdoor-brand HQ moves are valuable).
+NEGATIVE_TERMS = [
+    # Sports (the single biggest noise source)
+    "avalanche", "nuggets", "rockies", "broncos", "golden knights",
+    "rangers", "nwsl", "mls cup", "playoff", "conference final",
+    "scoreless", "series-opening", "quarterback", "touchdown", "halftime",
+    "inning", "goaltender", "power play", "season opener",
+    # Dining / food / consumer retail
+    "restaurant", "deli", "menu", "dining", "eatery", "brewery", "taproom",
+    "brewpub", "chicken", "pizza", "burger", "coffee shop", "food hall",
+    "market hall", "grocery", "furniture", "go-kart", "go kart",
+    # Residential real estate (we want commercial/corporate, not housing)
+    "residences", "rental community", "apartment community", "condos",
+    "for-sale homes", "townhomes",
+    # Entertainment venues
+    "amphitheater", "concert venue", "movie theater", "casino",
+    # Recreation/lifestyle activity pieces
+    "hikers", "hiking trail",
+    # Specific company-name collisions with the city of Aurora.
+    # "Aurora Innovation" (autonomous trucking) and partner Hirschbach keep
+    # surfacing as false geo matches. Reject them by name; this does NOT harm
+    # legitimate city-of-Aurora stories (our aerospace-corridor niche).
+    "aurora innovation", "aurora driver", "aurora cannabis", "aurora mobile",
+    "hirschbach", "autonomous trucking",
+]
+
 # Words that, if they're the leading token, signal "not a company name"
 NON_COMPANY_LEADERS = {
     "the", "a", "an", "how", "why", "what", "new", "more", "two", "three",
@@ -219,8 +249,17 @@ def _parse_date(entry) -> Optional[str]:
 
 
 def is_relevant(item: NewsItem) -> bool:
-    """An item is relevant if it references the Front Range AND a signal term."""
+    """
+    Relevant = references the Front Range AND a signal term AND contains no
+    hard-reject (sports/food/retail/residential/known-collision) term.
+    The negative check runs first and short-circuits everything else.
+    """
     haystack = f"{item.title} {item.summary}".lower()
+
+    # Hard reject: any noise term kills the item outright
+    if any(term in haystack for term in NEGATIVE_TERMS):
+        return False
+
     has_geo = any(term in haystack for term in DENVER_GEO_TERMS)
     has_signal = any(term in haystack for term in SIGNAL_TERMS)
     return has_geo and has_signal
@@ -284,9 +323,19 @@ def guess_company(title: str) -> str:
 # ----------------------------------------------------------------------
 
 def scrape_news(queries: Optional[list[str]] = None) -> list[NewsItem]:
-    """Run all queries, parse, filter for relevance, dedup within-run by title."""
+    """Run all queries, parse, filter for relevance, dedup within-run.
+
+    Two dedup layers:
+      1. Title — drops the exact same article surfaced by multiple queries.
+      2. Company — collapses multi-source coverage of ONE event (e.g. three
+         outlets all reporting the same lab opening) down to a single Inbox
+         row. Only applies when we have a confident, specific company guess
+         (>= 3 chars); blank/ambiguous guesses always pass through so we
+         never silently merge distinct unnamed signals.
+    """
     queries = queries or QUERIES
     seen_titles: set[str] = set()
+    seen_companies: set[str] = set()
     items: list[NewsItem] = []
 
     for q in queries:
@@ -298,10 +347,19 @@ def scrape_news(queries: Optional[list[str]] = None) -> list[NewsItem]:
                 continue
             if not is_relevant(item):
                 continue
-            norm = re.sub(r"\W+", "", item.title.lower())
-            if norm in seen_titles:
+
+            norm_title = re.sub(r"\W+", "", item.title.lower())
+            if norm_title in seen_titles:
                 continue
-            seen_titles.add(norm)
+
+            norm_company = re.sub(r"\W+", "", (item.company_guess or "").lower())
+            if norm_company and len(norm_company) >= 3 and norm_company in seen_companies:
+                log.debug("  company dedup: skipping %r (%s)", item.title, item.company_guess)
+                continue
+
+            seen_titles.add(norm_title)
+            if norm_company and len(norm_company) >= 3:
+                seen_companies.add(norm_company)
             items.append(item)
         time.sleep(DELAY_BETWEEN_FEEDS)
 

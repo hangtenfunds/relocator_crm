@@ -40,7 +40,9 @@ EXTENDED_FRONT_RANGE = DENVER_METRO_COUNTIES | {"Larimer", "Weld", "El Paso"}
 
 # Keyword → industry classification (matched against the Summary text)
 INDUSTRY_KEYWORDS = [
-    (r"\b(aerospace|defense|missile|hypersonic|satellite|space|cleared)\b",
+    (r"\b(aerospace|missile|hypersonic|satellite|spaceflight|space\s+launch|"
+     r"space\s+systems|orbital|rocket|launch\s+vehicle|defense\s+contractor|"
+     r"national\s+defense|defense\s+sector|defense\s+and\s+aerospace)\b",
      "Aerospace/Defense"),
     (r"\b(biotech|life sciences|pharmaceutical|pharma|therapeutics|"
      r"medical device|diagnostics)\b", "Biotech/Life Sciences"),
