@@ -9,7 +9,8 @@ sys.path.insert(0, ".")
 
 from ats_scraper import (
     normalize_greenhouse, normalize_lever, is_front_range,
-    mentions_relocation, fetch_board, ATSJob, RecruiterActivity,
+    mentions_relocation, fetch_board, scrape_ats,
+    CompanyHiringActivity, RecruiterActivity,
 )
 
 # --- Synthetic Greenhouse payload (company) ---
@@ -99,19 +100,76 @@ def test_fetch_board_injection():
     print("✓ fetch_board payload injection + unknown-ATS safety")
 
 
-def test_company_inbox_row():
-    job = ATSJob(
-        org_name="Acme Corp", title="Senior Systems Engineer",
-        location="Aurora, CO", url="https://boards.greenhouse.io/acme/jobs/1",
-        ats="greenhouse", posted_at="2026-05-20",
+def test_company_inbox_row_with_relo():
+    activity = CompanyHiringActivity(
+        org_name="Acme Corp",
+        board_url="https://boards.greenhouse.io/acme",
+        ats="greenhouse",
+        front_range_count=12,
+        relocation_count=8,
+        sample_relo_titles=["Staff Engineer", "Director, RevOps", "Senior PM"],
+        sample_fr_titles=["Staff Engineer", "Director, RevOps", "Senior PM", "Marketing Manager"],
     )
-    row = job.to_inbox_row(suggested_match="CO-0009", confidence=95)
+    row = activity.to_inbox_row(suggested_match="CO-0009", confidence=95)
     assert row["extracted_company"] == "Acme Corp"
-    assert "relocation" in row["extracted_description"].lower()
-    assert row["source_url"].endswith("/jobs/1")
+    assert "12 Front-Range" in row["extracted_description"]
+    assert "8 explicitly offer relocation" in row["extracted_description"]
+    assert row["extracted_jobs"] == 12
     assert row["suggested_match"] == "CO-0009"
-    assert row["source_name"].startswith("ATS:")
-    print("✓ company ATSJob -> inbox row")
+    assert "Tier 1" in row["notes"]
+    print("✓ company hiring summary -> inbox row (with relocation)")
+
+
+def test_company_inbox_row_no_relo():
+    activity = CompanyHiringActivity(
+        org_name="Beta LLC",
+        board_url="https://boards.greenhouse.io/beta",
+        ats="greenhouse",
+        front_range_count=3,
+        relocation_count=0,
+        sample_relo_titles=[],
+        sample_fr_titles=["Local Sales Rep", "Office Manager"],
+    )
+    row = activity.to_inbox_row()
+    assert "no relocation language detected" in row["extracted_description"]
+    assert "Lower priority" in row["notes"]
+    print("✓ company hiring summary -> inbox row (no relocation)")
+
+
+def test_one_row_per_company_end_to_end():
+    """The full pipeline should emit ONE row per company, regardless of how
+    many roles match — the fix for the 22-Checkr-rows issue."""
+    watchlist = [
+        {"name": "Acme", "ats": "greenhouse", "token": "acme", "type": "company"},
+    ]
+    # Inject 22 matching jobs to mirror the real Checkr scenario
+    big_payload = {
+        "jobs": [
+            {
+                "title": f"Role {i}",
+                "location": {"name": "Denver, Colorado, United States"},
+                "absolute_url": f"https://x/{i}",
+                "content": "We offer relocation assistance.",
+                "updated_at": "2026-06-04T00:00:00Z",
+            }
+            for i in range(22)
+        ]
+    }
+    # Monkey-patch fetch_board to return our payload
+    import ats_scraper
+    orig = ats_scraper.fetch_board
+    ats_scraper.fetch_board = lambda ats, tok: ats_scraper.normalize_greenhouse(big_payload)
+    try:
+        out = scrape_ats(watchlist=watchlist)
+    finally:
+        ats_scraper.fetch_board = orig
+
+    assert len(out) == 1, f"Expected 1 collapsed row, got {len(out)}"
+    activity = out[0]
+    assert isinstance(activity, CompanyHiringActivity)
+    assert activity.front_range_count == 22
+    assert activity.relocation_count == 22
+    print("✓ end-to-end: 22 matching jobs collapse to 1 Inbox row")
 
 
 def test_recruiter_inbox_row():
@@ -131,6 +189,8 @@ def test_recruiter_inbox_row():
 if __name__ == "__main__":
     test_normalize_and_filters()
     test_fetch_board_injection()
-    test_company_inbox_row()
+    test_company_inbox_row_with_relo()
+    test_company_inbox_row_no_relo()
     test_recruiter_inbox_row()
+    test_one_row_per_company_end_to_end()
     print("\n✓ All ATS scraper tests passed.")

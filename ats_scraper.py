@@ -69,42 +69,65 @@ RELOCATION_RE = re.compile(
 
 
 @dataclass
-class ATSJob:
-    """A single relocation-mentioning Front-Range job posting (company board)."""
+class CompanyHiringActivity:
+    """Summary of one company's Front-Range hiring activity in this run.
+
+    One Inbox row per company per run -- not one per job. This matches the
+    news scraper's company-level dedup behavior so triage stays sane when
+    a single company posts many roles at once.
+    """
     org_name: str
-    title: str
-    location: str
-    url: str
+    board_url: str
     ats: str
-    posted_at: Optional[str] = None
+    front_range_count: int
+    relocation_count: int
+    sample_relo_titles: list[str] = field(default_factory=list)
+    sample_fr_titles: list[str] = field(default_factory=list)
 
     @property
     def link(self) -> str:
-        return self.url
+        return self.board_url
 
     @property
     def display_name(self) -> str:
         return self.org_name
 
     def to_inbox_row(self, suggested_match: str = "", confidence: int = 0) -> dict:
-        date_part = f", {self.posted_at}" if self.posted_at else ""
+        # Lead with relocation-mentioning titles; fall back to general FR if none
+        titles = self.sample_relo_titles or self.sample_fr_titles
+        sample = "; ".join(titles[:4])
+
+        if self.relocation_count > 0:
+            headline = (
+                f"Hiring ({self.ats}): {self.front_range_count} Front-Range role(s), "
+                f"{self.relocation_count} explicitly offer relocation. Sample: {sample}"
+            )
+            note = (
+                "Strong signal — multiple Front-Range roles with employer "
+                "relocation language. Likely moves people in regularly. "
+                "Tier 1 target."
+            )
+        else:
+            headline = (
+                f"Hiring ({self.ats}): {self.front_range_count} Front-Range role(s), "
+                f"no relocation language detected. Sample: {sample}"
+            )
+            note = (
+                "Front-Range hiring without explicit relocation language. "
+                "Corroborates presence but doesn't confirm they move people in. "
+                "Lower priority unless other signals exist."
+            )
+
         return {
             "source_name": f"ATS: {self.org_name}"[:80],
-            "source_url": self.url,
+            "source_url": self.board_url,
             "extracted_company": self.org_name,
-            "extracted_description": (
-                f"Hiring ({self.ats}): \"{self.title}\" in {self.location}{date_part} "
-                f"— posting mentions employer relocation assistance"
-            ),
-            "extracted_jobs": "",
+            "extracted_description": headline,
+            "extracted_jobs": self.front_range_count,
             "extracted_county": "",
             "suggested_match": suggested_match,
             "match_confidence": confidence if confidence else "",
-            "notes": (
-                "Hiring signal: a Front-Range role at this company explicitly "
-                "offers relocation — strong indicator they move people in. "
-                "Corroborates / raises priority."
-            ),
+            "notes": note,
         }
 
 
@@ -244,7 +267,8 @@ def mentions_relocation(job: dict) -> bool:
 def scrape_ats(watchlist: Optional[list[dict]] = None) -> list:
     """
     Walk the watch-list, fetch each board, and emit findings:
-      - company boards -> ATSJob per relocation-mentioning Front-Range role
+      - company boards   -> one CompanyHiringActivity per company with any
+                            Front-Range postings (collapsed from per-job rows)
       - recruiter boards -> one RecruiterActivity summary if actively posting
     """
     if watchlist is None:
@@ -272,34 +296,46 @@ def scrape_ats(watchlist: Optional[list[dict]] = None) -> list:
         log.info("  %d total, %d Front-Range, %d mention relocation",
                  len(jobs), len(fr_jobs), len(relo_jobs))
 
+        # Default board URL — used if the watchlist entry doesn't override
+        board_url = entry.get("board_url", "") or (
+            GREENHOUSE_URL.format(token=token) if ats == "greenhouse"
+            else LEVER_URL.format(token=token)
+        )
+
         if org_type == "recruiter":
             if fr_jobs:
                 findings.append(RecruiterActivity(
                     org_name=name,
-                    board_url=entry.get("board_url", "")
-                              or (GREENHOUSE_URL.format(token=token) if ats == "greenhouse"
-                                  else LEVER_URL.format(token=token)),
+                    board_url=board_url,
                     ats=ats,
                     front_range_count=len(fr_jobs),
                     relocation_count=len(relo_jobs),
                     sample_titles=[j["title"] for j in fr_jobs[:4]],
                 ))
         else:  # company
-            for j in relo_jobs:
-                if not j.get("url"):
-                    continue
-                findings.append(ATSJob(
-                    org_name=name,
-                    title=j["title"],
-                    location=j["location"] or "Front Range",
-                    url=j["url"],
-                    ats=ats,
-                    posted_at=j.get("posted_at") or None,
-                ))
+            if not fr_jobs:
+                continue  # No Front-Range activity at all — nothing to surface
+            findings.append(CompanyHiringActivity(
+                org_name=name,
+                board_url=board_url,
+                ats=ats,
+                front_range_count=len(fr_jobs),
+                relocation_count=len(relo_jobs),
+                sample_relo_titles=[j["title"] for j in relo_jobs[:4]],
+                sample_fr_titles=[j["title"] for j in fr_jobs[:4]],
+            ))
 
         time.sleep(DELAY_BETWEEN_BOARDS)
 
-    # Sort so relocation company-signals lead, recruiters after
-    findings.sort(key=lambda f: 0 if isinstance(f, ATSJob) else 1)
+    # Order: relocation-mentioning companies first, then no-relo companies,
+    # then recruiters last
+    def _sort_key(f):
+        if isinstance(f, RecruiterActivity):
+            return (2, 0)
+        if isinstance(f, CompanyHiringActivity):
+            return (0 if f.relocation_count > 0 else 1, -f.relocation_count)
+        return (3, 0)
+
+    findings.sort(key=_sort_key)
     log.info("ATS findings: %d", len(findings))
     return findings
