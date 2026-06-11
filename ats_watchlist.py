@@ -3,48 +3,55 @@ ATS watch-list — the boards the ATS collector monitors.
 
 HOW TO ADD A BOARD
 ------------------
-Find a company's careers page. If the URL looks like:
-  boards.greenhouse.io/acmecorp   -> ats="greenhouse", token="acmecorp"
-  jobs.lever.co/acmecorp          -> ats="lever",      token="acmecorp"
-...then add an entry below. The token is the last path segment.
+On a company's careers page, click into any individual job posting and look
+at the URL of the job detail page:
+  boards.greenhouse.io/X/jobs/...         -> ats="greenhouse", token="X"
+  job-boards.greenhouse.io/X/jobs/...     -> ats="greenhouse", token="X"
+  jobs.lever.co/X/...                     -> ats="lever",      token="X"
+  X.wd1.myworkdayjobs.com/...             -> Workday (NOT SUPPORTED — skip)
+  X.ashbyhq.com/...                       -> Ashby (NOT SUPPORTED — skip)
+  Custom URL on the company's domain      -> in-house ATS (NOT SUPPORTED — skip)
 
-If you're not sure a token is valid, run:
-  python main.py --only ats --dry-run -v
-Invalid tokens just log a 404 and are skipped — they won't break the run.
+If you're not sure a token resolves, run the verifier:
+  python verify_watchlist.py
+
+It pings every board and prints a clean table of which work, which return
+no Front-Range jobs, and which 404. Use that to prune broken entries.
 
 TYPES
 -----
-  "company"  -> a potential relocation client. Emits an Inbox row for each
-                Front-Range posting that mentions employer relocation.
-  "recruiter"-> a potential referral PARTNER. Emits a summary row when the
-                firm is actively posting Front-Range roles.
+  "company"   -> potential relocation client. One summary Inbox row per run.
+  "recruiter" -> potential referral PARTNER (not a relocation client).
+
+WHAT TO EXPECT
+--------------
+This tool covers the Greenhouse + Lever universe — primarily growth-stage
+tech and startups. The 1,000+ employee established companies (Gusto, Pax8,
+Ibotta, JumpCloud, Quantum Metric, SonderMind, Ping Identity, Maxar, and
+the defense primes like Lockheed/Northrop/Raytheon) are on Workday, which
+this tool doesn't cover. For those, rely on OEDIT decisions, news signals,
+and direct outreach instead.
 
 SEEDING STRATEGY
 ----------------
-The highest-value seed is the companies already in your CRM. When you add a
-company to the Companies tab, check their careers page and add their board
-here too — then the ATS collector starts watching their hiring automatically.
-
-The entries below are STARTER EXAMPLES of well-known Colorado-presence tech
-employers. TOKENS ARE BEST-GUESSES AND MUST BE VERIFIED — run a dry run and
-prune whatever 404s. They're here to give you a working starting point, not a
-vetted list.
+The highest-value seed is the companies already in your CRM. When you add
+a company to the Companies tab, do the 30-second URL check above. If they
+land on Greenhouse or Lever, add them here. If they land on Workday or
+an in-house system, note that in the company's CRM record and skip.
 """
 
 WATCHLIST = [
-    # --- Company boards (verify tokens via a dry run; prune 404s) ---
-    {"name": "Gusto",            "ats": "greenhouse", "token": "gusto",          "type": "company"},
-    {"name": "Guild",            "ats": "greenhouse", "token": "guild",          "type": "company"},
-    {"name": "Ibotta",           "ats": "greenhouse", "token": "ibotta",         "type": "company"},
-    {"name": "Pax8",             "ats": "greenhouse", "token": "pax8",           "type": "company"},
-    {"name": "JumpCloud",        "ats": "greenhouse", "token": "jumpcloud",      "type": "company"},
-    {"name": "Checkr",           "ats": "greenhouse", "token": "checkr",         "type": "company"},
-    {"name": "Quantum Metric",   "ats": "lever",      "token": "quantummetric",  "type": "company"},
-    {"name": "SonderMind",       "ats": "greenhouse", "token": "sondermind",     "type": "company"},
-    {"name": "Ping Identity",    "ats": "greenhouse", "token": "pingidentity",   "type": "company"},
-    {"name": "Maxar",            "ats": "greenhouse", "token": "maxar",          "type": "company"},
+    # --- Verified Greenhouse/Lever boards (from the first dry run) ---
+    # These resolved with Front-Range relocation-language postings. Add more
+    # as you verify additional companies via the workflow described above.
+    {"name": "Checkr", "ats": "greenhouse", "token": "checkr", "type": "company"},
+    {"name": "Guild",  "ats": "greenhouse", "token": "guild",  "type": "company"},
 
-    # --- Recruiter / staffing boards (examples; most retained-search firms
-    #     are NOT on these APIs — see the recruiter starter list for those) ---
-    # {"name": "Example Staffing", "ats": "lever",     "token": "examplestaffing", "type": "recruiter"},
+    # --- Add more verified entries here, one per line. Examples of the shape:
+    # {"name": "Acme Corp",     "ats": "greenhouse", "token": "acmecorp",    "type": "company"},
+    # {"name": "Beta Labs",     "ats": "lever",      "token": "betalabs",    "type": "company"},
+
+    # --- Recruiter / staffing boards (most retained-search firms are NOT on
+    #     these APIs — see recruiter_starter_list.csv for those).
+    # {"name": "Example Staffing", "ats": "lever", "token": "examplestaffing", "type": "recruiter"},
 ]
