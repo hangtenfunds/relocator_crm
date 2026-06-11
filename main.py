@@ -37,7 +37,7 @@ def setup_logging(verbose: bool):
 
 def parse_args():
     p = argparse.ArgumentParser(description="Relocation CRM scrapers")
-    p.add_argument("--only", choices=["oedit", "news"], default=None,
+    p.add_argument("--only", choices=["oedit", "news", "ats"], default=None,
                    help="Run only one scraper (default: all)")
     p.add_argument("--months", type=int, default=3,
                    help="OEDIT: number of recent months to scrape (default 3)")
@@ -87,9 +87,17 @@ def collect_news(args, log) -> list:
     return items
 
 
+def collect_ats(args, log) -> list:
+    from ats_scraper import scrape_ats
+    items = scrape_ats()
+    log.info("ATS findings collected: %d", len(items))
+    return items
+
+
 SCRAPERS = {
     "oedit": collect_oedit,
     "news": collect_news,
+    "ats": collect_ats,
 }
 
 

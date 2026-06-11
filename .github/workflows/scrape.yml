@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       scraper:
-        description: 'Which scraper to run (all / oedit / news)'
+        description: 'Which scraper to run (all / oedit / news / ats)'
         required: false
         default: 'all'
       months:
@@ -51,8 +51,8 @@ jobs:
             echo "dry=${{ github.event.inputs.dry_run || 'false' }}" >> "$GITHUB_OUTPUT"
             echo "months=${{ github.event.inputs.months || '3' }}" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.event.schedule }}" = "0 14 * * 1" ]; then
-            # Monday news run
-            echo "scraper=news" >> "$GITHUB_OUTPUT"
+            # Monday weekly run: news + ATS (and a cheap, deduped OEDIT recheck)
+            echo "scraper=all" >> "$GITHUB_OUTPUT"
             echo "dry=false" >> "$GITHUB_OUTPUT"
             echo "months=3" >> "$GITHUB_OUTPUT"
           else

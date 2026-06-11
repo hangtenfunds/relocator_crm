@@ -3,7 +3,7 @@
 Automated intel pipeline that feeds the CRM Inbox with new corporate
 relocation signals.
 
-Two signal sources are live:
+Three signal sources are live:
 
 - **OEDIT scraper** — pulls Colorado Economic Development Commission
   approved projects each month (structured, high-signal: company/codename,
@@ -13,8 +13,15 @@ Two signal sources are live:
   Business Journal, BusinessDen, Denver Gazette, Denver Post, etc.) in one
   clean feed. Surfaces headlines + links into the Inbox; your Monday triage
   confirms the company and decides Create/Link/Ignore.
+- **ATS scraper** — pulls live job postings from companies' applicant-tracking
+  systems via the official, public, auth-free Greenhouse and Lever Job Board
+  APIs. The robust alternative to scraping Built In Colorado / Indeed (which
+  are JS-rendered, feed-less, and ToS-restricted): we go to the original
+  source those aggregators pull from. Flags Front-Range postings that mention
+  employer relocation (a strong "they move people in" signal) and, for
+  recruiter boards, surfaces firms actively posting Front-Range roles.
 
-Both write into the same Inbox and share the same dedup, fuzzy-matching,
+All write into the same Inbox and share the same dedup, fuzzy-matching,
 and Apps Script flow.
 
 ### A note on the news scraper
@@ -26,6 +33,21 @@ content publicly. It fetches politely (a couple seconds between queries).
 If you ever expand this into anything public-facing, review Google News and
 each publisher's terms first.
 
+### A note on the ATS scraper + the recruiter list
+
+The ATS collector reads a watch-list (`ats_watchlist.py`) of Greenhouse/Lever
+board tokens. Seed it from companies already in your CRM — check a company's
+careers page, and if it's `boards.greenhouse.io/TOKEN` or `jobs.lever.co/TOKEN`,
+add the token. Unknown/invalid tokens just log a 404 and are skipped.
+
+Job-board data over-indexes on high-posting contingency staffing firms and
+misses retained executive-search firms (who work confidential searches and
+rarely post). Those retained firms are often your highest-value referral
+partners — so they're delivered separately as `recruiter_starter_list.csv`,
+a research-built list you import into a Recruiters tab and grow through
+relationships. The ATS tool catches the high-posting firms; the CSV covers
+the rest.
+
 ---
 
 ## What's in here
@@ -35,15 +57,19 @@ relocation_scrapers/
 ├── main.py                  CLI entry point (runs one or all scrapers)
 ├── oedit_scraper.py         OEDIT fetch + parse logic
 ├── news_scraper.py          Google News RSS aggregation logic
+├── ats_scraper.py           Greenhouse/Lever job-board collector
+├── ats_watchlist.py         Board tokens to monitor (edit this to add boards)
+├── recruiter_starter_list.csv  Research-built recruiter targets (import to a Recruiters tab)
 ├── sheets_client.py         Reusable Google Sheets read/write wrapper
 ├── config.py                Loads credentials + spreadsheet ID from env
 ├── test_parser.py           OEDIT parser test (synthetic HTML, no network)
 ├── test_news.py             News scraper test (synthetic feed, no network)
+├── test_ats.py              ATS scraper test (synthetic JSON, no network)
 ├── requirements.txt         Python dependencies
 ├── .env.example             Template for local env vars
 ├── .gitignore               Keeps secrets out of git
 └── .github/workflows/
-    └── scrape.yml           Schedules: OEDIT monthly, news weekly
+    └── scrape.yml           Schedules: OEDIT monthly, news + ATS weekly
 ```
 
 ---
